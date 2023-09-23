@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+
+import argparse
+import datetime
+import logging
+import os
+import sys
+
+import idrive
+
+
+def main():
+    from idrive.main import idrive_login, db_init, db_insert_folder, __db_has_folder, __db_fetch_next_folder, __idrive_browseFolder, __db_cursor, __db_update_folder_size, __db_insert_remote_file, __db_insert_folder, log
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('uid', type=str, help='IDrive login user ID.')
+    parser.add_argument('pwd', type=str, help='IDrive login password.')
+    parser.add_argument('device_id', type=str, help='IDrive device ID.')
+    parser.add_argument('-db', '--db-name', type=str, help='SQLite database name.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbosity.')
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+    # setup
+    device_id = args.device_id
+    db_init(args.db_name)
+    idrive_login(args.uid, args.pwd)
+    root_folder = '/'
+    if not __db_has_folder(root_folder, device_id=device_id):
+        db_insert_folder(root_folder, device_id=device_id)
+
+    # add filesystem folders and files to database
+    while True:
+        # get a starting folder for search:
+        # query db for a folder with no filename and size -1 limit 1
+        root_folder = __db_fetch_next_folder(device_id=device_id)
+        if not root_folder:
+            break
+
+        cursor = __db_cursor()
+
+        # list the folder
+        try:
+            files = __idrive_browseFolder(device_id, root_folder)
+        except:
+            __db_update_folder_size(cursor, root_folder, -2, device_id=device_id)
+            cursor.connection.commit()
+            continue
+
+        # add all files and subfolders to database
+        for file_info in files:
+            filename, is_dir = file_info['name'], file_info['is_dir']
+            if is_dir:
+                folder = os.path.join(root_folder, filename) + '/'
+                __db_insert_folder(cursor, folder, device_id=device_id)
+            else:
+                size, lmd = int(file_info['size']), file_info['lmd']
+                mtime = int(round(datetime.datetime.strptime(lmd, '%Y/%m/%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp()))
+                __db_insert_remote_file(cursor, device_id, root_folder, filename, size, mtime)
+
+        # update the size of the folder in the database with the number of files/folders
+        size = len(files)
+        __db_update_folder_size(cursor, root_folder, size, device_id=device_id)
+
+        # commit
+        cursor.connection.commit()
+
+    log.info("Done ingesting!")
+
+
+if __name__ == '__main__':
+    os.nice(19)
+    main()

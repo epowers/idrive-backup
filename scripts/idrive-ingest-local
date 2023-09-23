@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+
+import argparse
+import os
+import stat
+import sys
+
+import idrive
+
+
+def main():
+    from idrive.main import db_init, __db_fetch_next_folder, __db_has_folder, db_insert_folder, __db_cursor, __db_insert_folder, __db_insert_file, __db_update_folder_size, log
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('root', type=str, help='Root file folder to search.')
+    parser.add_argument('--db', type=str, help='SQLite database name.')
+    args = parser.parse_args()
+
+    root_folder, db_name = args.root, args.db
+
+    # setup
+    db_init(db_name)
+    if not __db_has_folder(root_folder):
+        db_insert_folder(root_folder)
+
+    # add filesystem folders and files to database
+    while True:
+        # get a starting folder for search:
+        # query db for a folder with no filename and size -1 limit 1
+        root_folder = __db_fetch_next_folder()
+        if not root_folder:
+            break
+
+        # list the folder
+        files = os.listdir(root_folder)
+        # for now, ignore dot files and folders
+        files = list(filter(lambda filename: not filename.startswith('.'), files))
+        # get stats for all filenames
+        # TODO: speed this up with os.lstat(..., dir_fd=dir_fd)
+        files = dict(map(lambda filename: (filename, os.lstat(os.path.join(root_folder, filename))), files))
+        folders = dict(filter(lambda item: (lambda filename, st_info: stat.S_ISDIR(st_info.st_mode))(*item), files.items()))
+        files = dict(filter(lambda item: (lambda filename, st_info: stat.S_ISREG(st_info.st_mode))(*item), files.items()))
+
+        cursor = __db_cursor()
+
+        # update the size of the folder in the database with the number of files/folders
+        size = len(files) + len(folders)
+        __db_update_folder_size(cursor, root_folder, size)
+
+        # add all files and subfolders to database
+        for filename, st_info in files.items():
+            __db_insert_file(cursor, root_folder, filename, st_info)
+        for filename, st_info in folders.items():
+            folder = os.path.join(root_folder, filename) + '/'
+            __db_insert_folder(cursor, folder)
+
+        # commit
+        cursor.connection.commit()
+
+    log.info("Done ingesting!")
+
+
+if __name__ == '__main__':
+    os.nice(19)
+    main()
