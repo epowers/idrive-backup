@@ -9,7 +9,18 @@ import idrive
 
 
 def main():
-    from idrive.main import db_init, __db_fetch_next_folder, __db_has_folder, db_insert_folder, __db_cursor, __db_insert_folder, __db_insert_file, __db_update_folder_size, log
+    from idrive.main import (
+        db_init,
+        db_insert_folder,
+        __db_cursor,
+        __db_fetch_next_folder,
+        __db_has_folder,
+        __db_insert_folder,
+        __db_insert_file,
+        __db_update_folder_status,
+        FileStatus,
+        log,
+    )
 
     parser = argparse.ArgumentParser()
     parser.add_argument('root', type=str, help='Root file folder to search.')
@@ -43,16 +54,15 @@ def main():
 
         cursor = __db_cursor()
 
-        # update the size of the folder in the database with the number of files/folders
-        size = len(files) + len(folders)
-        __db_update_folder_size(cursor, root_folder, size)
-
         # add all files and subfolders to database
         for filename, st_info in files.items():
-            __db_insert_file(cursor, root_folder, filename, st_info)
+            __db_insert_file(cursor, root_folder, filename, st_info=st_info)
         for filename, st_info in folders.items():
             folder = os.path.join(root_folder, filename) + '/'
             __db_insert_folder(cursor, folder)
+
+        # update the size of the folder in the database with the number of files/folders
+        __db_update_folder_status(cursor, root_folder, FileStatus.SCANNED)
 
         # commit
         cursor.connection.commit()

@@ -10,7 +10,20 @@ import idrive
 
 
 def main():
-    from idrive.main import idrive_login, db_init, db_insert_folder, __db_has_folder, __db_fetch_next_folder, __idrive_browseFolder, __db_cursor, __db_update_folder_size, __db_insert_remote_file, __db_insert_folder, log
+    from idrive.main import (
+        db_init,
+        db_insert_folder,
+        __db_cursor,
+        __db_fetch_next_folder,
+        __db_has_folder,
+        __db_insert_folder,
+        __db_insert_file,
+        __db_update_folder_status,
+        FileStatus,
+        log,
+        idrive_login,
+        __idrive_browseFolder,
+    )
 
     parser = argparse.ArgumentParser()
     parser.add_argument('uid', type=str, help='IDrive login user ID.')
@@ -24,18 +37,19 @@ def main():
         logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
     # setup
+    host = 'evs.idrive.com'
     device_id = args.device_id
     db_init(args.db_name)
     idrive_login(args.uid, args.pwd)
     root_folder = '/'
-    if not __db_has_folder(root_folder, device_id=device_id):
-        db_insert_folder(root_folder, device_id=device_id)
+    if not __db_has_folder(root_folder, host=host, device_id=device_id):
+        db_insert_folder(root_folder, host=host, device_id=device_id)
 
     # add filesystem folders and files to database
     while True:
         # get a starting folder for search:
-        # query db for a folder with no filename and size -1 limit 1
-        root_folder = __db_fetch_next_folder(device_id=device_id)
+        # query db for a folder with no filename and defaul status limit 1
+        root_folder = __db_fetch_next_folder(host=host, device_id=device_id)
         if not root_folder:
             break
 
@@ -45,7 +59,7 @@ def main():
         try:
             files = __idrive_browseFolder(device_id, root_folder)
         except:
-            __db_update_folder_size(cursor, root_folder, -2, device_id=device_id)
+            __db_update_folder_status(cursor, root_folder, FileStatus.ERROR, host=host, device_id=device_id)
             cursor.connection.commit()
             continue
 
@@ -54,15 +68,14 @@ def main():
             filename, is_dir = file_info['name'], file_info['is_dir']
             if is_dir:
                 folder = os.path.join(root_folder, filename) + '/'
-                __db_insert_folder(cursor, folder, device_id=device_id)
+                __db_insert_folder(cursor, folder, host=host, device_id=device_id)
             else:
                 size, lmd = int(file_info['size']), file_info['lmd']
                 mtime = int(round(datetime.datetime.strptime(lmd, '%Y/%m/%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp()))
-                __db_insert_remote_file(cursor, device_id, root_folder, filename, size, mtime)
+                __db_insert_file(cursor, root_folder, filename, host=host, device_id=device_id, size=size, mtime=mtime)
 
         # update the size of the folder in the database with the number of files/folders
-        size = len(files)
-        __db_update_folder_size(cursor, root_folder, size, device_id=device_id)
+        __db_update_folder_status(cursor, root_folder, FileStatus.SCANNED, host=host, device_id=device_id)
 
         # commit
         cursor.connection.commit()
