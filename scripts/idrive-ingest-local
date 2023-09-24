@@ -9,7 +9,7 @@ import idrive
 
 
 def main():
-    from idrive.main import (
+    from idrive.db_sqlite import (
         db_init,
         db_insert_folder,
         __db_cursor,

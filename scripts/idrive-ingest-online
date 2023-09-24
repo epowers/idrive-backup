@@ -10,7 +10,7 @@ import idrive
 
 
 def main():
-    from idrive.main import (
+    from idrive.db_sqlite import (
         db_init,
         db_insert_folder,
         __db_cursor,
@@ -21,6 +21,8 @@ def main():
         __db_update_folder_status,
         FileStatus,
         log,
+    )
+    from idrive.evsweb import (
         idrive_login,
         __idrive_browseFolder,
     )
