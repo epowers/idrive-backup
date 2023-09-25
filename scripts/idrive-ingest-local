@@ -5,25 +5,23 @@ import os
 import stat
 import sys
 
-import idrive
+from idrive import (
+    db_init,
+    db_has_folder,
+    db_insert_folder,
+    db_fetch_next_folder,
+    db_cursor,
+    db_cursor_insert_folder,
+    db_cursor_insert_file,
+    db_cursor_update_folder_size,
+    db_cursor_update_folder_status,
+    get_local_host,
+    FileStatus,
+    log,
+)
 
 
 def main():
-    from idrive.db_sqlite import (
-        db_init,
-        db_insert_folder,
-        __db_cursor,
-        __db_fetch_next_folder,
-        __db_has_folder,
-        __db_insert_folder,
-        __db_insert_file,
-        __db_update_folder_size,
-        __db_update_folder_status,
-        __get_host,
-        FileStatus,
-        log,
-    )
-
     parser = argparse.ArgumentParser()
     parser.add_argument('root', type=str, help='Root file folder to search.')
     parser.add_argument('-db', '--db-name', type=str, help='SQLite database name.')
@@ -32,16 +30,16 @@ def main():
     root_folder = args.root
 
     # setup
-    host = __get_host()
+    host = get_local_host()
     db_init(args.db_name, host=host)
-    if not __db_has_folder(root_folder):
-        db_insert_folder(root_folder)
+    if not db_has_folder(root_folder, host=host):
+        db_insert_folder(root_folder, host=host)
 
     # add filesystem folders and files to database
     while True:
         # get a starting folder for search:
         # query db for a folder with no filename and size -1 limit 1
-        root_folder = __db_fetch_next_folder()
+        root_folder = db_fetch_next_folder(host=host)
         if not root_folder:
             break
 
@@ -55,19 +53,19 @@ def main():
         folders = dict(filter(lambda item: (lambda filename, st_info: stat.S_ISDIR(st_info.st_mode))(*item), files.items()))
         regular_files = dict(filter(lambda item: (lambda filename, st_info: stat.S_ISREG(st_info.st_mode))(*item), files.items()))
 
-        cursor = __db_cursor()
+        cursor = db_cursor(host=host)
 
         # add all files and subfolders to database
         for filename, st_info in reguler_files.items():
-            __db_insert_file(cursor, root_folder, filename, st_info=st_info)
+            db_cursor_insert_file(cursor, root_folder, filename, st_info=st_info, host=host)
         for filename, st_info in folders.items():
             folder = os.path.join(root_folder, filename) + '/'
-            __db_insert_folder(cursor, folder)
+            db_cursor_insert_folder(cursor, folder, host=host)
 
         # update the size of the folder in the database with the number of files/folders
         size = len(files)
-        __db_update_folder_size(cursor, root_folder, size)
-        __db_update_folder_status(cursor, root_folder, FileStatus.SCANNED)
+        db_cursor_update_folder_size(cursor, root_folder, size, host=host)
+        db_cursor_update_folder_status(cursor, root_folder, FileStatus.SCANNED, host=host)
 
         # commit
         cursor.connection.commit()

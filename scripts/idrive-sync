@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+
+import argparse
+import logging
+import os
+import sys
+
+from idrive import (
+    db_init,
+    get_local_host,
+    db_list_device_ids_by_host,
+    db_filter_files_by_status,
+    db_any_file_path,
+    idrive_get_host,
+    log,
+    FileStatus,
+)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-db', '--db-name', type=str, help='SQLite database name.')
+    parser.add_argument('-n', '--dry-run', action='store_true', help='Dry run: do not write to database.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbosity.')
+    args = parser.parse_args()
+    db_name, verbose, dry_run = args.db_name, args.verbose, args.dry_run
+
+    if verbose:
+        logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+    # setup
+    db_init(db_name)
+
+    # read host and device combinations from index database.
+    device_ids_by_host = db_list_device_ids_by_host()
+
+    # TODO:
+    # check all local/remote databases for folders not scanned and abort.
+    for host, device_ids in device_ids_by_host.items():
+        for device_id in device_ids:
+            pass
+
+    remote_host = idrive_get_host()
+    remote_device_ids = device_ids_by_host[remote_host]
+    local_host = get_local_host()
+    local_device_ids = device_ids_by_host[local_host]
+
+    # get local host and for each local device:
+    for device_id in local_device_ids:
+        # get local files not archived.
+        cursor = db_filter_files_by_status(FileStatus.DEFAULT, fields=('folder', 'filename', 'size'), host=local_host, device_id=device_id)
+        for folder, filename, size in cursor:
+            b_found_match = False
+
+            # search remote devices for files matched by name and size.
+            for remote_device_id in remote_device_ids:
+                if db_any_file_path(filename=filename, host=remote_host, device_id=remote_device_id, size=size):
+                    b_found_match = True
+                    break
+
+            if not b_found_match:
+                # mark files with no match with a status to schedule for backup.
+                log.debug(f"Marked file DIRTY: {folder}{filename}")
+                if not dry_run:
+                    db_update_file_status(folder, filename, FileStatus.DIRTY, host=host, device_id=device_id)
+
+    log.info("Done sync!")
+
+
+if __name__ == '__main__':
+    os.nice(19)
+    main()
