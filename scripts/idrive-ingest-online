@@ -18,7 +18,9 @@ def main():
         __db_has_folder,
         __db_insert_folder,
         __db_insert_file,
+        __db_update_folder_size,
         __db_update_folder_status,
+        __get_host,
         FileStatus,
         log,
     )
@@ -41,7 +43,7 @@ def main():
     # setup
     host = 'evs.idrive.com'
     device_id = args.device_id
-    db_init(args.db_name)
+    db_init(args.db_name, host=host, device_id=device_id)
     idrive_login(args.uid, args.pwd)
     root_folder = '/'
     if not __db_has_folder(root_folder, host=host, device_id=device_id):
@@ -55,7 +57,7 @@ def main():
         if not root_folder:
             break
 
-        cursor = __db_cursor()
+        cursor = __db_cursor(host=host, device_id=device_id)
 
         # list the folder
         try:
@@ -77,6 +79,8 @@ def main():
                 __db_insert_file(cursor, root_folder, filename, host=host, device_id=device_id, size=size, mtime=mtime)
 
         # update the size of the folder in the database with the number of files/folders
+        size = len(files)
+        __db_update_folder_size(cursor, root_folder, size, host=host, device_id=device_id)
         __db_update_folder_status(cursor, root_folder, FileStatus.SCANNED, host=host, device_id=device_id)
 
         # commit
