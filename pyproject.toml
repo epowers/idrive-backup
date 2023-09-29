@@ -8,5 +8,5 @@ version = "0.0.1"
 dependencies = [
     "pytest",
     "requests",
-    'importlib-metadata; python_version>="3.5"',
+    "importlib-metadata",
 ]

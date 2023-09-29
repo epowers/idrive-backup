@@ -2,6 +2,7 @@
 
 import argparse
 import datetime
+from getpass import getpass
 import logging
 import os
 import sys
@@ -24,11 +25,17 @@ from idrive import (
 )
 
 
+def getuser(prompt):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    return input()
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('uid', type=str, help='IDrive login user ID.')
-    parser.add_argument('pwd', type=str, help='IDrive login password.')
-    parser.add_argument('device_id', type=str, help='IDrive device ID.')
+    parser.add_argument('-uid', '--user-id', type=str, help='IDrive login user ID.')
+    parser.add_argument('-pwd', '--password', type=str, help='IDrive login password.')
+    parser.add_argument('-dev', '--device-id', type=str, help='IDrive device ID.')
     parser.add_argument('-db', '--db-name', type=str, help='SQLite database name.')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbosity.')
     args = parser.parse_args()
@@ -36,11 +43,16 @@ def main():
     if args.verbose:
         logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
+    uid = args.user_id or getuser(prompt="IDrive User ID: ")
+    pwd = args.password or getpass(prompt="IDrive Password: ")
+    device_id = args.device_id
+    assert uid and pwd
+    assert device_id, "Device ID is required."
+
     # setup
     host = idrive_get_host()
-    device_id = args.device_id
     db_init(args.db_name, host=host, device_id=device_id)
-    idrive_login(args.uid, args.pwd)
+    idrive_login(uid, pwd)
     root_folder = '/'
     if not db_has_folder(root_folder, host=host, device_id=device_id):
         db_insert_folder(root_folder, host=host, device_id=device_id)
@@ -59,7 +71,7 @@ def main():
         try:
             files = idrive_browseFolder(device_id, root_folder)
         except:
-            db_update_folder_status(cursor, root_folder, FileStatus.ERROR, host=host, device_id=device_id)
+            db_cursor_update_folder_status(cursor, root_folder, FileStatus.ERROR, host=host, device_id=device_id)
             cursor.connection.commit()
             continue
 
@@ -68,7 +80,7 @@ def main():
             filename, is_dir = file_info['name'], file_info['is_dir']
             if is_dir:
                 folder = os.path.join(root_folder, filename) + '/'
-                db_insert_folder(cursor, folder, host=host, device_id=device_id)
+                db_cursor_insert_folder(cursor, folder, host=host, device_id=device_id)
             else:
                 size, lmd = int(file_info['size']), file_info['lmd']
                 mtime = int(round(datetime.datetime.strptime(lmd, '%Y/%m/%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp()))
@@ -76,8 +88,8 @@ def main():
 
         # update the size of the folder in the database with the number of files/folders
         size = len(files)
-        db_update_folder_size(cursor, root_folder, size, host=host, device_id=device_id)
-        db_update_folder_status(cursor, root_folder, FileStatus.SCANNED, host=host, device_id=device_id)
+        db_cursor_update_folder_size(cursor, root_folder, size, host=host, device_id=device_id)
+        db_cursor_update_folder_status(cursor, root_folder, FileStatus.SCANNED, host=host, device_id=device_id)
 
         # commit
         cursor.connection.commit()
