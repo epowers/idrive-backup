@@ -171,10 +171,21 @@ def db_cursor_select_fetchall_files(cursor, fields: tuple, where: Optional[dict]
 
 
 def __db_cursor_insert_file(cursor, data: dict):
-    keys, values = zip(*data.items())
+    primary_keys = set(('host', 'device_id', 'folder', 'filename'))
+    keys = set(data.keys()) & primary_keys
     columns = ','.join(keys)
     variables = ','.join(map(lambda key: ':' + key, keys))
-    cursor.execute('''INSERT INTO files ({columns}) VALUES ({variables})'''.format(columns=columns, variables=variables), data)
+    conditions = ' AND '.join(map(lambda key: f'{key} = :{key}', keys))
+    cursor.execute(
+        '''INSERT INTO files ({columns}) '''
+        '''SELECT {variables} WHERE NOT EXISTS '''
+        '''(SELECT {columns} FROM files WHERE {conditions})'''
+        ''.format(columns=columns, variables=variables, conditions=conditions), data)
+
+    keys = set(data.keys()) - primary_keys
+    if keys:
+        predicates = ', '.join(map(lambda key: f'{key} = :{key}', keys))
+        cursor.execute('''UPDATE files SET {predicates} WHERE {conditions}'''.format(predicates=predicates, conditions=conditions), data)
 
 
 def db_cursor_select_fetchone_file(cursor, fields: tuple, where: dict):
