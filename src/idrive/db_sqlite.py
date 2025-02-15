@@ -1,4 +1,6 @@
+import datetime
 import enum
+from itertools import chain
 import logging
 import os
 import sqlite3 as SQL
@@ -6,8 +8,168 @@ import socket
 from typing import Optional
 
 
+log = logging.getLogger(__name__.split('.',1)[0])
+
 APP_NAME = 'idrive-backup'
 DEFAULT_DB_NAME = 'index.db'
+
+IDRIVE_DB_SCHEMA = {
+        'ibbackupset': {
+            'columns': {
+                'ITEM_ID': {
+                    'column_number': 0,
+                    'type': int,
+                    'column_type': 'integer primary key autoincrement',
+                    },
+                'ITEM_NAME': {
+                    'column_number': 1,
+                    'type': str,
+                    'column_type': 'char(50)',
+                    },
+                'ITEM_TYPE': {
+                    'column_number': 2,
+                    'type': str,
+                    'column_type': 'char(2)',
+                    },
+                'ITEM_STATUS': {
+                    'column_number': 3,
+                    'type': str,
+                    'column_type': 'char(50)',
+                    },
+                'ITEM_LMD': {
+                    'column_number': 4,
+                    'type': str,
+                    'column_type': 'char(50)',
+                    'default': '0',
+                    },
+                },
+            'unique': [
+                'ITEM_NAME',
+                ],
+            },
+        'ibfolder': {
+            'columns': {
+                'DIRID': {
+                    'column_number': 0,
+                    'type': int,
+                    'column_type': 'integer primary key autoincrement',
+                    },
+                'NAME': {
+                    'column_number': 1,
+                    'type': str,
+                    'column_type': 'char(1024) not null',
+                    },
+                'DIR_LMD': {
+                    'column_number': 2,
+                    'type': str,
+                    'column_type': 'char(256)',
+                    },
+                'DIR_SIZE': {
+                    'column_number': 3,
+                    'type': int,
+                    'column_type': '__int64',
+                    'default': 0,
+                    },
+                'DIR_COUNT': {
+                    'column_number': 4,
+                    'type': int,
+                    'column_type': '__int64',
+                    'default': 0,
+                    },
+                'DIR_PARENT': {
+                    'column_number': 5,
+                    'type': int,
+                    'column_type': '__int64',
+                    },
+                },
+            'unique': [
+                'NAME',
+                ],
+            },
+        'ibfile': {
+            'columns': {
+                'FILEID': {
+                    'column_number': 0,
+                    'type': int,
+                    'column_type': 'integer primary key autoincrement',
+                    },
+                'DIRID': {
+                    'column_number': 1,
+                    'type': int,
+                    'column_type': 'integer not null',
+                    },
+                'NAME': {
+                    'column_number': 2,
+                    'type': str,
+                    'column_type': 'char(1024) not null',
+                    },
+                'FILE_LMD': {
+                    'column_number': 3,
+                    'type': datetime.datetime,
+                    'column_type': 'DATETIME',
+                    'default': 0,
+                    },
+                'FILE_SIZE': {
+                    'column_number': 4,
+                    'type': int,
+                    'column_type': '__int64',
+                    },
+                'FOLDER_ID': {
+                    'column_number': 5,
+                    'type': str,
+                    'column_type': 'char(1024)',
+                    'default': "'-'",
+                    },
+                'ENC_NAME': {
+                    'column_number': 6,
+                    'type': str,
+                    'column_type': 'char(1024)',
+                    'default': "'-'",
+                    },
+                'BACKUP_STATUS': {
+                    'column_number': 7,
+                    'type': int,
+                    'column_type': 'integer',
+                    'default': 0,
+                    },
+                'CHECKSUM': {
+                    'column_number': 8,
+                    'type': str,
+                    'column_type': 'char(256)',
+                    'default': "'-'",
+                    },
+                'LAST_UPDATED': {
+                    'column_number': 9,
+                    'type': datetime.datetime,
+                    'column_type': 'DATETIME',
+                    'default': 'CURRENT_TIMESTAMP',
+                    },
+                },
+            'foreign key': {
+                'columns': [
+                    'DIRID',
+                    ],
+                'references': {
+                    'ibfolder': [
+                        'DIRID',
+                        ],
+                    },
+                },
+            'unique': [
+                'DIRID',
+                'NAME',
+                ],
+            'indices': {
+                'ibfile_name': {
+                    'table': 'ibfile',
+                    'columns': [
+                        'NAME',
+                        ],
+                    },
+                },
+            },
+    }
+
 
 class FileStatus(enum.IntEnum):
     DEFAULT = -1
@@ -16,12 +178,12 @@ class FileStatus(enum.IntEnum):
     DIRTY = 1
 
 
-log = logging.getLogger(__name__.split('.',1)[0])
-
-
-__hostname = socket.gethostname()
+__hostname = None
 
 def get_local_host():
+    global __hostname
+    if __hostname is None:
+        __hostname = socket.gethostname()
     return __hostname
 
 
@@ -378,3 +540,28 @@ def db_update_file_status(folder, filename, status, host=None, device_id=None):
 
 def db_update_file_path_md5(path):
     raise NotImplemented
+
+
+def __idrive_db_select(cursor, table, fields: Optional[tuple] = None):
+    columns = IDRIVE_DB_SCHEMA[table]['columns'].keys()
+    if fields is not None:
+        columns = list(filter(lambda name: name in fields, columns))
+    cursor.execute('''SELECT {columns} FROM {table}'''.format(
+        columns = ','.join(columns),
+        table = table,
+    ))
+
+def idrive_db_fetchall(cursor, table, fields: Optional[tuple] = None):
+    __idrive_db_select(cursor, table, fields)
+    result = cursor.fetchall()
+    return result
+
+def idrive_db_select_files(cursor):
+    ibfile = IDRIVE_DB_SCHEMA['ibfile']['columns'].keys()
+    ibfile = list(map(lambda column: 'ibfile.{column}'.format(column=column), ibfile))
+    ibfolder = IDRIVE_DB_SCHEMA['ibfolder']['columns'].keys()
+    ibfolder = list(map(lambda column: 'ibfolder.{column}'.format(column=column), ibfolder))
+    cursor.execute('''SELECT {columns} FROM ibfile JOIN ibfolder ON ibfile.DIRID = ibfolder.DIRID'''.format(
+        columns = ','.join(chain(ibfile, ibfolder)),
+    ))
+    return map(lambda row: dict(zip(ibfile + ibfolder, row)), cursor)
