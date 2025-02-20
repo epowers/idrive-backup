@@ -13,7 +13,7 @@ log = logging.getLogger(__name__.split('.',1)[0])
 APP_NAME = 'idrive-backup'
 DEFAULT_DB_NAME = 'index.db'
 
-IDRIVE_DB_SCHEMA = {
+DB_SCHEMA = {
         'ibbackupset': {
             'columns': {
                 'ITEM_ID': {
@@ -106,7 +106,7 @@ IDRIVE_DB_SCHEMA = {
                 'FILE_LMD': {
                     'column_number': 3,
                     'type': datetime.datetime,
-                    'column_type': 'DATETIME',
+                    'column_type': 'datetime',
                     'default': 0,
                     },
                 'FILE_SIZE': {
@@ -141,7 +141,7 @@ IDRIVE_DB_SCHEMA = {
                 'LAST_UPDATED': {
                     'column_number': 9,
                     'type': datetime.datetime,
-                    'column_type': 'DATETIME',
+                    'column_type': 'datetime',
                     'default': 'CURRENT_TIMESTAMP',
                     },
                 },
@@ -168,8 +168,106 @@ IDRIVE_DB_SCHEMA = {
                     },
                 },
             },
+        'DirEnt': {
+            'columns': {
+                'id': {
+                    'column_name': 0,
+                    'type': int,
+                    'column_type': 'integer primary key',
+                    },
+                'path': {
+                    'column_name': 1,
+                    'type': str,
+                    'column_type': 'text not null unique',
+                    },
+                'type': {
+                    'column_name': 2,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'inode': {
+                    'column_name': 3,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'mode': {
+                    'column_name': 4,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'dev': {
+                    'column_name': 5,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'nlink': {
+                    'column_name': 6,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'uid': {
+                    'column_name': 7,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'gid': {
+                    'column_name': 8,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'size': {
+                    'column_name': 9,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'atime': {
+                    'column_name': 10,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'mtime': {
+                    'column_name': 11,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'ctime': {
+                    'column_name': 12,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'atime_ns': {
+                    'column_name': 13,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'mtime_ns': {
+                    'column_name': 14,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'ctime_ns': {
+                    'column_name': 15,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'blocks': {
+                    'column_name': 16,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                'rdev': {
+                    'column_name': 17,
+                    'type': int,
+                    'column_type': 'integer',
+                    },
+                #'flags': {
+                #    'column_name': 18,
+                #    'type': int,
+                #    'column_type': 'integer',
+                #    },
+                },
+            },
     }
-
 
 class FileStatus(enum.IntEnum):
     DEFAULT = -1
@@ -274,16 +372,16 @@ def db_cursor(host=None, device_id=None):
 def __db_create_tables(conn):
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE files ('''
-        ''' host TEXT NOT NULL,'''
-        ''' device_id TEXT DEFAULT "" NOT NULL,'''
-        ''' folder TEXT DEFAULT "" NOT NULL,'''
-        ''' filename TEXT DEFAULT "" NOT NULL,'''
-        ''' code INTEGER DEFAULT -1 NOT NULL CHECK(typeof(code) = "integer"),'''
-        ''' ino INTEGER DEFAULT -1 NOT NULL CHECK(typeof(ino) = "integer"),'''
-        ''' dev INTEGER DEFAULT -1 NOT NULL CHECK(typeof(dev) = "integer"),'''
-        ''' size INTEGER DEFAULT -1 NOT NULL CHECK(typeof(size) = "integer"),'''
-        ''' mtime REAL DEFAULT -1 NOT NULL CHECK(typeof(mtime) = "real"),'''
-        ''' md5 TEXT )''') # TODO: sql 3.37.0+ supports STRICT
+        ''' host text not null,'''
+        ''' device_id text default "" not null,'''
+        ''' folder text default "" not null,'''
+        ''' filename text default "" not null,'''
+        ''' code integer default -1 not null CHECK(typeof(code) = "integer"),'''
+        ''' ino integer default -1 not null CHECK(typeof(ino) = "integer"),'''
+        ''' dev integer default -1 not null CHECK(typeof(dev) = "integer"),'''
+        ''' size integer default -1 not null CHECK(typeof(size) = "integer"),'''
+        ''' mtime real default -1 not null CHECK(typeof(mtime) = "real"),'''
+        ''' md5 text )''') # TODO: sql 3.37.0+ supports STRICT
     cursor.execute('''CREATE INDEX idx_files_path ON files (folder ASC, filename ASC)''')
     cursor.execute('''CREATE INDEX idx_files_host ON files (host ASC)''')
     cursor.execute('''CREATE INDEX idx_files_device_id ON files (device_id ASC)''')
@@ -542,8 +640,84 @@ def db_update_file_path_md5(path):
     raise NotImplemented
 
 
+def create_table(cursor, table):
+    columns = DB_SCHEMA[table]['columns']
+    indices = DB_SCHEMA[table].get('indices', [])
+    unique = DB_SCHEMA[table].get('unique')
+    foreign_key = DB_SCHEMA[table].get('foreign key')
+
+    cursor.executemany([
+        '''CREATE TABLE {table} ({columns} {foreign_key} {unique})'''.format(
+            table = table,
+            columns = ','.join(map(lambda name: '''{name} {type} {default}'''.format(
+                name = name,
+                type = columns[name]['column_type'],
+                default = 'default {}'.format(columns[name]['default']) if 'default' in columns[name] else '',
+                ), columns.keys())),
+            foreign_key = '''foreign key ({columns}) references {references}'''.format(
+                columns = ','.join(foreign_key['columns']),
+                references = ','.join(map(lambda table: '''{table} ({columns})'''.format(
+                    table = table,
+                    columns = ','.join(foreign_key['references'][table])), foreign_key['references'].keys())),
+                ) if foreign_key else '',
+            unique = '''unique ({columns})'''.format(
+                columns = ','.join(unique),
+                ) if unique else '',
+            ),
+        ] + list(map(lambda name:
+        '''CREATE INDEX {name} ON {table} ({columns})'''.format(
+            name = name,
+            table = table,
+            columns = ','.join(indices[name]),
+            ), indices.keys())))
+    cursor.connection.commit()
+
+
+def idrive_db_init(db_name=None, db_dir=None, host=None, device_id=None):
+    # set the current db name
+    global __db_name
+    __db_name = db_name
+
+    # get the default db name
+    db_name = __get_db_name(host=host, device_id=device_id)
+
+    # create the default db
+    if not db_dir:
+        db_dir = __get_cache_dir(True)
+    db_path = os.path.join(db_dir, db_name)
+    if not os.path.isfile(db_path):
+        connection = SQL.connect(db_path)
+        cursor = connection.cursor()
+        cursor.execute('''CREATE TABLE files ('''
+            ''' host text not null,'''
+            ''' device_id text default "" not null,'''
+            ''' folder text default "" not null,'''
+            ''' filename text default "" not null,'''
+            ''' code integer default -1 not null CHECK(typeof(code) = "integer"),'''
+            ''' ino integer default -1 not null CHECK(typeof(ino) = "integer"),'''
+            ''' dev integer default -1 not null CHECK(typeof(dev) = "integer"),'''
+            ''' size integer default -1 not null CHECK(typeof(size) = "integer"),'''
+            ''' mtime real default -1 not null CHECK(typeof(mtime) = "real"),'''
+            ''' md5 text )''') # TODO: sql 3.37.0+ supports STRICT
+        cursor.execute('''CREATE INDEX idx_files_path ON files (folder ASC, filename ASC)''')
+        cursor.execute('''CREATE INDEX idx_files_host ON files (host ASC)''')
+        cursor.execute('''CREATE INDEX idx_files_device_id ON files (device_id ASC)''')
+        cursor.execute('''CREATE INDEX idx_files_folder ON files (folder ASC)''')
+        cursor.execute('''CREATE INDEX idx_files_filename ON files (filename ASC)''')
+        connection.commit()
+
+        # create table
+        cursor.executemany([
+            '''CREATE TABLE IF NOT EXISTS DirEnt ({})'''.format(
+                ", ".join(" ".join(e) for e in DIRENT_TABLE_SCHEMA)),
+            '''CREATE UNIQUE INDEX IF NOT EXISTS DirEnt_path_idx ON DirEnt (path)''',
+            '''CREATE INDEX IF NOT EXISTS DirEnt_size_idx ON DirEnt (size)''',
+            ])
+        connection.commit()
+
+
 def __idrive_db_select(cursor, table, fields: Optional[tuple] = None):
-    columns = IDRIVE_DB_SCHEMA[table]['columns'].keys()
+    columns = DB_SCHEMA[table]['columns'].keys()
     if fields is not None:
         columns = list(filter(lambda name: name in fields, columns))
     cursor.execute('''SELECT {columns} FROM {table}'''.format(
@@ -557,9 +731,9 @@ def idrive_db_fetchall(cursor, table, fields: Optional[tuple] = None):
     return result
 
 def idrive_db_select_files(cursor):
-    ibfile = IDRIVE_DB_SCHEMA['ibfile']['columns'].keys()
+    ibfile = DB_SCHEMA['ibfile']['columns'].keys()
     ibfile = list(map(lambda column: 'ibfile.{column}'.format(column=column), ibfile))
-    ibfolder = IDRIVE_DB_SCHEMA['ibfolder']['columns'].keys()
+    ibfolder = DB_SCHEMA['ibfolder']['columns'].keys()
     ibfolder = list(map(lambda column: 'ibfolder.{column}'.format(column=column), ibfolder))
     cursor.execute('''SELECT {columns} FROM ibfile JOIN ibfolder ON ibfile.DIRID = ibfolder.DIRID'''.format(
         columns = ','.join(chain(ibfile, ibfolder)),
